@@ -19,7 +19,7 @@ class Identities:
                 values = self.candidates.setdefault(name, [])
                 if pid not in values:
                     values.append(pid)
-                    print(f"Discovered {name}: {pid}. Confirm with: .\\start_fdg.bat --confirm-id \"{name}\" \"{pid}\"", flush=True)
+                    print(f"Discovered {name}: {pid}. If this is your player's ID, confirm with: .\\start_fdg.bat --confirm-player \"{name}\"", flush=True)
                     changed = True
         if changed:
             self.candidate_path.write_text(json.dumps(self.candidates, ensure_ascii=False, indent=2), encoding="utf-8")

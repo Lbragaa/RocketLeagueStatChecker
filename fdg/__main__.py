@@ -29,10 +29,17 @@ def main():
     parser = argparse.ArgumentParser(description="FDG official Stats API collector (Ctrl+C to stop)")
     parser.add_argument("--mode", choices=("fdg", "casual-test"), default="fdg")
     parser.add_argument("--confirm-id", nargs=2, metavar=("NAME", "PRIMARY_ID"))
+    parser.add_argument("--confirm-player", metavar="NAME", help="Confirm a player's sole discovered ID without shell pipe characters")
     parser.add_argument("--recover-wire", metavar="PATH", help="Recover a recorded wire capture, then exit")
     args = parser.parse_args()
     store = Store(os.getenv("FDG_DATA_DIR", "data"))
     identities = Identities(store.directory)
+    if args.confirm_player:
+        candidates = identities.candidates.get(args.confirm_player, [])
+        if len(candidates) != 1:
+            store.close()
+            parser.error("This player must have exactly one discovered ID; use Python directly with --confirm-id to select among candidates")
+        args.confirm_id = (args.confirm_player, candidates[0])
     if args.confirm_id:
         identities.confirm(*args.confirm_id)
         print("Identity confirmed. Restart the collector to use it.")

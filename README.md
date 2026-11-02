@@ -28,12 +28,12 @@ The collector initially observes names but does **not** trust them for saving el
 Verify the printed platform IDs, stop capture, then run each printed command in PowerShell, for example:
 
 ```powershell
-.\start_fdg.bat --confirm-id "bregzz_" "Steam|ACTUAL_ID|0"
-.\start_fdg.bat --confirm-id "Moose-" "Epic|ACTUAL_ID|0"
-.\start_fdg.bat --confirm-id "✪ Marinho" "Epic|ACTUAL_ID|0"
+.\start_fdg.bat --confirm-player "bregzz_"
+.\start_fdg.bat --confirm-player "Moose-"
+.\start_fdg.bat --confirm-player "✪ Marinho"
 ```
 
-Use actual observed IDs, not these examples. Restart capture after confirmation. Confirmations are stored locally in `data/identities.json`. Later display-name changes do not affect recognition. Duplicate or unobserved mappings are rejected. To fix a mapping, edit the local JSON while stopped, or confirm another observed candidate for that name.
+These commands confirm the sole observed ID for each named player. If multiple IDs were observed for the same name, select the correct one using Python directly: `.\.venv\python.exe -m fdg --confirm-id "NAME" "PLATFORM|ACTUAL_ID|0"` (or `py -3 -m fdg ...` with installed Python). Avoid passing pipe-containing IDs through a batch launcher from PowerShell. Restart capture after confirmation. Confirmations are stored locally in `data/identities.json`. Later display-name changes do not affect recognition. Duplicate or unobserved mappings are rejected. To fix a mapping, edit the local JSON while stopped, or confirm another observed candidate for that name.
 
 ## First test: play a random casual 3v3
 

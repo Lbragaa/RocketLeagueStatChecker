@@ -283,6 +283,19 @@ class CollectorTests(unittest.TestCase):
         ids.confirm(NAMES[2],"Steam|2|0")
         self.assertEqual(Identities(self.temp.name).confirmed[NAMES[2]],"Steam|2|0")
 
+    def test_confirm_player_cli_avoids_shell_metacharacters(self):
+        from fdg.__main__ import main
+        ids=Identities(self.temp.name)
+        ids.discover(state()['Data']['Players'])
+        with patch('sys.argv',['fdg','--confirm-player',NAMES[0]]), patch.dict('os.environ',{'FDG_DATA_DIR':self.temp.name}):
+            main()
+        self.assertEqual(Identities(self.temp.name).confirmed[NAMES[0]],'Steam|0|0')
+        ids.candidates[NAMES[0]].append('Epic|other|0')
+        ids.candidate_path.write_text(json.dumps(ids.candidates),encoding='utf-8')
+        with patch('sys.argv',['fdg','--confirm-player',NAMES[0]]), patch.dict('os.environ',{'FDG_DATA_DIR':self.temp.name}):
+            with self.assertRaises(SystemExit):
+                main()
+
     def test_sync_failure_retry_restart(self):
         self.engine.feed(state()); self.end()
         sync=Sync(self.store,"https://example.test/exec","secret")
