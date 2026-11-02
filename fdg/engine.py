@@ -6,7 +6,7 @@ PLAYLISTS = {3: "Casual Standard 3v3", 13: "Competitive Standard 3v3"}
 
 
 class Collector:
-    def __init__(self, store, identities, mode="fdg", playlists=(3, 13), settle=3, clock=None):
+    def __init__(self, store, identities, mode="fdg", playlists=(3, 13), settle=0, clock=None):
         import time
         self.store, self.identities, self.mode = store, identities, mode
         self.playlists, self.settle = playlists, settle

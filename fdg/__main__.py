@@ -40,7 +40,7 @@ def main():
         return
     engine = Collector(store, identities, args.mode,
                        tuple(int(p) for p in os.getenv("FDG_PLAYLISTS", "3,13").split(",")),
-                       settle=max(0, float(os.getenv("FDG_SETTLE_SECONDS", "3"))),
+                       settle=float("inf") if args.recover_wire else max(0, float(os.getenv("FDG_SETTLE_SECONDS", "0"))),
                        clock=(lambda: 0) if args.recover_wire else None)
     sync = Sync(store, os.getenv("FDG_SHEETS_URL", ""), os.getenv("FDG_SHEETS_TOKEN", ""))
     if args.recover_wire:

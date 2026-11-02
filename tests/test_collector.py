@@ -33,7 +33,7 @@ class CollectorTests(unittest.TestCase):
         self.ids = Identities(self.temp.name)
         self.ids.confirmed = {n: f"Steam|{i}|0" for i,n in enumerate(NAMES)}
         self.now = 100
-        self.engine = Collector(self.store, self.ids, clock=lambda: self.now)
+        self.engine = Collector(self.store, self.ids, settle=3, clock=lambda: self.now)
 
     def tearDown(self):
         self.store.close()
@@ -51,6 +51,24 @@ class CollectorTests(unittest.TestCase):
     def payload(self):
         row = self.store.db.execute("SELECT payload FROM matches").fetchone()
         return json.loads(row[0]) if row else None
+
+    def test_default_saves_at_match_ended_without_scoreboard_wait(self):
+        self.engine = Collector(self.store, self.ids, clock=lambda: self.now)
+        self.engine.feed(state())
+        self.event("MatchEnded", WinnerTeamNum=0)
+        self.assertIsNotNone(self.payload())
+        self.assertEqual(self.now, 100)
+
+    def test_recovery_keeps_late_snapshots_without_waiting_in_real_time(self):
+        self.engine = Collector(self.store, self.ids, settle=float('inf'), clock=lambda:0)
+        s=state()
+        self.engine.feed(s)
+        self.event("MatchEnded", WinnerTeamNum=0)
+        self.assertIsNone(self.payload())
+        s['Data']['Players'][0]['Score']=999
+        self.engine.feed(s)
+        self.engine.flush(force=True)
+        self.assertEqual(self.payload()['players'][0]['Score'],999)
 
     def test_final_stats_unicode_overtime_and_dedup(self):
         s = state()
