@@ -244,6 +244,24 @@ class CollectorTests(unittest.TestCase):
 
 
 class TransportTests(unittest.TestCase):
+    def test_live_exporter_string_data(self):
+        source=state()
+        encoded={"Event":source["Event"],"Data":json.dumps(source["Data"],ensure_ascii=False)}
+        wire=json.dumps(encoded,ensure_ascii=False)
+        result=JsonStream().feed(wire.encode('utf-8'))
+        self.assertEqual(result[0][0],source)
+        self.assertEqual(result[0][1],wire)
+
+    def test_recovery_unfinished_gzip(self):
+        import gzip
+        from fdg.transport import read_capture
+        with tempfile.TemporaryDirectory(dir='data') as directory:
+            path=Path(directory)/'capture.gz'
+            with gzip.open(path,'wb') as output:
+                output.write(json.dumps({"Event":"UpdateState","Data":json.dumps(state()['Data'])}).encode())
+                output.flush()
+                self.assertEqual(list(read_capture(path))[0][0],state())
+
     def test_fragmented_utf8_and_joined_messages(self):
         stream=JsonStream()
         original=json.dumps(state(),ensure_ascii=False)

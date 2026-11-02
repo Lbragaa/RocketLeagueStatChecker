@@ -42,7 +42,7 @@ You do **not** need Moose- or Marinho for this test:
 1. Launch capture and enter a casual Standard game so it discovers your `bregzz_` ID.
 2. Stop, confirm **your ID only**, then restart by double-clicking **`start_casual_test.bat`**.
 3. Play another full casual Standard match with random teammates. The collector identifies your team using your confirmed ID and records its three players. It still requires playlist `3`, a live state, and a valid `MatchEnded`.
-4. Stay through the scoreboard/podium for at least eight seconds. Compare the printed points, goals, assists and saves with your scoreboard. Inspect `data/fdg.sqlite3` for all player fields and event totals.
+4. Stay through the scoreboard/podium for about three seconds. Compare the printed points, goals, assists and saves with your scoreboard. Inspect `data/fdg.sqlite3` for all player fields and event totals.
 5. With Sheets configured, verify exactly three rows in **`TEST_Matches`**, plus totals in **`TEST_Summary`**. Play another game to check accumulation.
 
 Test data never enters `FDG_Matches` or `FDG_Summary`. Switch back to `start_fdg.bat` for the trio. Normal mode requires all three confirmed IDs observed together on one team in playlist `3` or `13`; only those three receive rows. Set `FDG_PLAYLISTS=13` in `.env` for competitive only. Casual-test mode always accepts only playlist `3`.
@@ -73,8 +73,8 @@ After editing Apps Script, use **Deploy → Manage deployments → Edit → New 
 - `data/fdg.sqlite3`: `active` holds durable in-progress snapshots; `matches` contains completed payloads and persistent upload status; `players` has the unique `(MatchGuid, PrimaryId)` key and full final player JSON. `MatchGuid` is also unique in `matches`. The same real match cannot be saved once in each mode: choose test/FDG mode before playing.
 - `data/raw/<hash>.jsonl.gz`: timestamped complete original JSON objects, including future events/fields. SHA-256 filenames avoid using external match IDs as paths. `wire-*.bin.gz` additionally preserves received socket bytes for framing diagnostics. No automatic retention/deletion; back up or archive this folder as needed. Raw data includes all observed players, not just FDG.
 - Latest player snapshots merge missing fields without replacing them with invented zeros. Missing fields are blank in Sheets. Loadout and all other state fields remain in SQLite/raw JSON; key final statistics and observed event dictionaries go to Sheets.
-- A valid `MatchEnded.WinnerTeamNum` starts an eight-second settling period. Later `UpdateState` snapshots and podium data are retained. `MatchDestroyed` finalizes immediately if a valid ending was seen. Closing capture preserves checkpoints; reopening resumes settlement and pending uploads. Leaving before `MatchEnded` is never treated as completion. Forfeits work when the API emits this valid ending.
-- If the collector has been stopped or disconnected across the final scoreboard, it cannot reconstruct messages that the game never delivered. Start before the match and remain connected through the podium. The eight-second window is a practical initial default to validate against real captures, not a guarantee of undocumented message ordering.
+- A valid `MatchEnded.WinnerTeamNum` starts a three-second settling period. Later `UpdateState` snapshots and podium data are retained. `MatchDestroyed` finalizes immediately if a valid ending was seen. Closing capture preserves checkpoints; reopening resumes settlement and pending uploads. Leaving before `MatchEnded` is never treated as completion. Forfeits work when the API emits this valid ending.
+- If the collector has been stopped or disconnected across the final scoreboard, it cannot reconstruct messages that the game never delivered. Start before the match and remain connected through the podium. The three-second window is a practical initial default to validate against real captures, not a guarantee of undocumented message ordering.
 - Team goals come from `Game.Teams.Score`; player points from `Players.Score`; player goals from `Players.Goals`. Winner comes only from `MatchEnded`, not guessed from the score. Overtime is latched once observed.
 - `DurationSeconds` intentionally remains blank: the documented `Elapsed` is replay-only and the remaining clock is not a reliable total duration for joined-in-progress games or forfeits. Timestamps are local receipt times in UTC, not a claimed server match-start time.
 - `ObservedEvents` counts received BallHit/GoalScored/CrossbarHit/BoostPickup/StatfeedEvent messages, with statfeed asset names grouped per player. Player attribution requires a unique current name + shortcut + team match. These are **observed event counts**, not replacements for scoreboard statistics, and can be incomplete after disconnects or mid-match starts. No inferred possession, boost usage, speed averages or other unavailable metrics.
@@ -94,3 +94,15 @@ The Python tests use documented-schema simulated events, fragmented TCP JSON, Un
 If disconnected, start Rocket League and verify `Test-NetConnection 127.0.0.1 -Port 49123`. If Python is missing, install it and reopen the terminal. If uploads stay pending, check the `/exec` URL, token, deployment permissions, and Apps Script **Executions** log. Do not share `.env`, `data/`, or raw captures publicly. For a protocol issue, retain raw captures; the official page specifies JSON envelopes but not TCP frame delimiters, so the parser accepts concatenated objects, newlines, or NUL separators and handles UTF-8 across packets.
 
 Source: [official Rocket League Stats API](https://www.rocketleague.com/developer/stats-api), checked November 2, 2026. Normal-play field visibility and socket framing still need verification against your first live capture. This implementation never sends API commands.
+
+## Final-score delay and capture recovery
+
+The default delay is now **three seconds after MatchEnded**, allowing late scoreboard updates. Set `FDG_SETTLE_SECONDS=0` in `.env` to save immediately (late updates may be missed). You do not need to close the listener to save or upload. Leaving the match after a valid ending finalizes immediately when `MatchDestroyed` arrives; otherwise the timer runs while the listener stays open, even in the menus.
+
+The Windows exporter may encode `Data` as a JSON string; both that live format and the documentation's object format are supported. To recover a previous wire capture, stop the listener, confirm your observed identity, then run:
+
+```powershell
+.\start_fdg.bat --mode casual-test --recover-wire "data\raw\wire-EXACT_FILENAME.bin.gz"
+```
+
+Use the actual filename from `data/raw`. Recovery processes the original complete messages before finalizing, requires the same eligibility/confirmed identity checks, and retries uploads. Repeating recovery cannot duplicate an already saved match. Captures from a running or interrupted writer can be read through their last complete message.

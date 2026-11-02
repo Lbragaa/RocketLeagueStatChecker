@@ -10,7 +10,7 @@ from .engine import Collector
 from .identity import Identities
 from .storage import Store
 from .sync import Sync
-from .transport import JsonStream
+from .transport import JsonStream, read_capture
 
 
 def load_env():
@@ -29,6 +29,7 @@ def main():
     parser = argparse.ArgumentParser(description="FDG official Stats API collector (Ctrl+C to stop)")
     parser.add_argument("--mode", choices=("fdg", "casual-test"), default="fdg")
     parser.add_argument("--confirm-id", nargs=2, metavar=("NAME", "PRIMARY_ID"))
+    parser.add_argument("--recover-wire", metavar="PATH", help="Recover a recorded wire capture, then exit")
     args = parser.parse_args()
     store = Store(os.getenv("FDG_DATA_DIR", "data"))
     identities = Identities(store.directory)
@@ -38,8 +39,19 @@ def main():
         store.close()
         return
     engine = Collector(store, identities, args.mode,
-                       tuple(int(p) for p in os.getenv("FDG_PLAYLISTS", "3,13").split(",")))
+                       tuple(int(p) for p in os.getenv("FDG_PLAYLISTS", "3,13").split(",")),
+                       settle=max(0, float(os.getenv("FDG_SETTLE_SECONDS", "3"))),
+                       clock=(lambda: 0) if args.recover_wire else None)
     sync = Sync(store, os.getenv("FDG_SHEETS_URL", ""), os.getenv("FDG_SHEETS_TOKEN", ""))
+    if args.recover_wire:
+        try:
+            for message, original in read_capture(args.recover_wire):
+                engine.feed(message, original)
+            engine.flush(force=True)
+            sync.run()
+        finally:
+            store.close()
+        return
     print(f"FDG collector — {args.mode}. Close this window or press Ctrl+C to stop.", flush=True)
     if not sync.url or not sync.token:
         print("Sheets not configured: matches remain safely queued locally.")
