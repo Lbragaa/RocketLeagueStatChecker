@@ -12,12 +12,19 @@ class Collector:
         self.playlists, self.settle = playlists, settle
         self.clock = clock or time.time
         self.active = store.restore()
+        self.history_replays = set()
 
     def feed(self, message, original=None):
         self.store.raw(message, original)
         event, data = message.get("Event"), message.get("Data", {})
         guid = data.get("MatchGuid")
-        if not guid or self.store.exists(guid):
+        if not guid:
+            return
+        if event == "ReplayCreated":
+            self.history_replays.add(guid)
+        if self.store.exists(guid):
+            if event == "UpdateState" and guid not in self.history_replays:
+                self.update_completed(guid, data)
             return
         s = self.active.setdefault(guid, {"players": {}, "game": {}, "first_seen": utcnow(),
             "events": {}, "player_events": {}, "overtime": False, "live": False, "replay": False,
@@ -79,6 +86,38 @@ class Collector:
         if event == "MatchDestroyed":
             self.finalize(guid)
         self.flush()
+
+    def update_completed(self, guid, data):
+        game = data.get("Game", {})
+        if "Frame" in game or "Elapsed" in game:
+            return
+        # Post-match scoreboard states can have bReplay=true; goal-replay states
+        # without a winner are not final scoreboard updates.
+        if game.get("bReplay") and not game.get("bHasWinner"):
+            return
+        payload = self.store.get(guid)
+        match = payload["match"]
+        if game.get("PlaylistId", match["PlaylistId"]) != match["PlaylistId"]:
+            return
+        current = {p.get("PrimaryId"): p for p in data.get("Players", [])}
+        for player in payload["players"]:
+            latest = current.get(player["PrimaryId"])
+            if latest and latest.get("TeamNum") == player["TeamNum"]:
+                # Store only fields used by the final record, not spectator telemetry.
+                for field in ("Name", "Score", "Goals", "Assists", "Saves", "Shots",
+                              "Touches", "CarTouches", "Demos", "Loadout"):
+                    if field in latest and latest[field] is not None:
+                        player[field] = latest[field]
+        teams = {t.get("TeamNum"): t.get("Score") for t in game.get("Teams", [])}
+        for team, key in ((0, "BlueScore"), (1, "OrangeScore")):
+            if type(teams.get(team)) is int:
+                match[key] = teams[team]
+        our_team = payload["players"][0]["TeamNum"]
+        match["TeamScore"] = match["BlueScore" if our_team == 0 else "OrangeScore"]
+        match["OpponentScore"] = match["OrangeScore" if our_team == 0 else "BlueScore"]
+        match["Overtime"] |= bool(game.get("bOvertime"))
+        if self.store.revise(payload):
+            print(f"Updated final statistics locally ({guid}); Sheets update queued.", flush=True)
 
     def select(self, current, s):
         if s["mode"] == "casual-test":

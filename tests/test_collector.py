@@ -59,6 +59,51 @@ class CollectorTests(unittest.TestCase):
         self.assertIsNotNone(self.payload())
         self.assertEqual(self.now, 100)
 
+    def test_late_scoreboard_updates_same_match_after_restart(self):
+        self.engine = Collector(self.store, self.ids, clock=lambda:self.now)
+        s=state(); self.engine.feed(s)
+        self.event('MatchEnded',WinnerTeamNum=0)
+        with self.store.db:
+            self.store.db.execute('UPDATE matches SET synced=1')
+        self.engine = Collector(self.store, self.ids, clock=lambda:self.now)
+        s['Data']['Players'][0]['Score']=777
+        del s['Data']['Players'][0]['Touches']
+        s['Data']['Game'].update(bReplay=True,bHasWinner=True)
+        self.engine.feed(s)
+        p=self.payload()
+        self.assertEqual(p['players'][0]['Score'],777)
+        self.assertEqual(p['players'][0]['Touches'],20)
+        self.assertEqual(p['match']['Revision'],2)
+        self.assertEqual(self.store.db.execute('SELECT synced FROM matches').fetchone()[0],0)
+        self.engine.feed(s)
+        self.assertEqual(self.payload()['match']['Revision'],2)
+        self.assertEqual(self.store.db.execute('SELECT count(*) FROM players').fetchone()[0],3)
+        self.assertEqual(self.store.db.execute('SELECT count(*) FROM matches').fetchone()[0],1)
+        self.event('ReplayCreated')
+        s['Data']['Players'][0]['Score']=1
+        self.engine.feed(s)
+        self.assertEqual(self.payload()['players'][0]['Score'],777)
+
+    def test_upload_ack_cannot_clear_a_newer_pending_revision(self):
+        import io
+        self.engine=Collector(self.store,self.ids,clock=lambda:self.now)
+        s=state(); self.engine.feed(s); self.event('MatchEnded',WinnerTeamNum=0)
+        def upload(*args,**kwargs):
+            s['Data']['Players'][0]['Score']=900
+            self.engine.feed(s)
+            return io.BytesIO(b'{"ok":true,"protocol":2,"revision":1,"matchGuid":"match-1"}')
+        with patch('urllib.request.urlopen',side_effect=upload):
+            Sync(self.store,'https://example.test/exec','secret').run()
+        self.assertEqual(self.store.db.execute('SELECT synced FROM matches').fetchone()[0],0)
+        self.assertEqual(self.payload()['match']['Revision'],2)
+
+    def test_old_sheets_receiver_does_not_acknowledge_revision(self):
+        import io
+        self.engine.feed(state()); self.end()
+        with patch('urllib.request.urlopen',return_value=io.BytesIO(b'{"ok":true,"matchGuid":"match-1"}')):
+            Sync(self.store,'https://example.test/exec','secret').run()
+        self.assertEqual(self.store.db.execute('SELECT synced FROM matches').fetchone()[0],0)
+
     def test_recovery_keeps_late_snapshots_without_waiting_in_real_time(self):
         self.engine = Collector(self.store, self.ids, settle=float('inf'), clock=lambda:0)
         s=state()
@@ -201,7 +246,7 @@ class CollectorTests(unittest.TestCase):
             def do_POST(handler):
                 received.append(json.loads(handler.rfile.read(int(handler.headers['Content-Length']))))
                 handler.send_response(200); handler.end_headers()
-                handler.wfile.write(b'{"ok":true,"matchGuid":"match-1"}')
+                handler.wfile.write(b'{"ok":true,"protocol":2,"revision":1,"matchGuid":"match-1"}')
 
             def log_message(self,*args):
                 pass
@@ -247,7 +292,7 @@ class CollectorTests(unittest.TestCase):
         self.store.close(); self.store=Store(self.temp.name)
         sync=Sync(self.store,"https://example.test/exec","secret")
         import io
-        with patch("urllib.request.urlopen",return_value=io.BytesIO(b'{"ok":true,"matchGuid":"match-1"}')) as request:
+        with patch("urllib.request.urlopen",return_value=io.BytesIO(b'{"ok":true,"protocol":2,"revision":1,"matchGuid":"match-1"}')) as request:
             sync.run()
             body=json.loads(request.call_args.args[0].data)
             self.assertEqual(body["match"]["MatchGuid"],"match-1")

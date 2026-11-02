@@ -43,11 +43,30 @@ class Store:
     def exists(self, guid):
         return self.db.execute("SELECT 1 FROM matches WHERE guid=?", (guid,)).fetchone() is not None
 
+    def get(self, guid):
+        row = self.db.execute("SELECT payload FROM matches WHERE guid=?", (guid,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def revise(self, payload):
+        guid = payload["match"]["MatchGuid"]
+        with self.db:
+            old = self.get(guid)
+            if not old or old == payload:
+                return False
+            payload["match"]["Revision"] = old["match"].get("Revision", 1) + 1
+            self.db.execute("UPDATE matches SET payload=?, synced=0 WHERE guid=?",
+                            (json.dumps(payload, ensure_ascii=False), guid))
+            for player in payload["players"]:
+                self.db.execute("INSERT OR REPLACE INTO players VALUES (?,?,?)",
+                                (guid, player["PrimaryId"], json.dumps(player, ensure_ascii=False)))
+        return True
+
     def save(self, payload):
         guid = payload["match"]["MatchGuid"]
         with self.db:
             if self.exists(guid):
                 return False
+            payload["match"]["Revision"] = 1
             self.db.execute("INSERT INTO matches(guid,payload) VALUES (?,?)",
                             (guid, json.dumps(payload, ensure_ascii=False)))
             for player in payload["players"]:

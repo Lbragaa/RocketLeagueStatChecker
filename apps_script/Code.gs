@@ -2,7 +2,7 @@ const SPREADSHEET_ID = '1Ks2KiCLUatlW97Krlyo2GFavp8-iIG8CGKX7m5pvQYs';
 const HEADERS = ['UniqueKey','MatchGuid','Timestamp','PrimaryId','Name','Result','TeamScore',
   'OpponentScore','Score','Goals','Assists','Saves','Shots','Touches','CarTouches','Demos',
   'TeamNum','PlaylistId','PlaylistName','Arena','BlueScore','OrangeScore','WinnerTeamNum',
-  'Overtime','DurationSeconds','Loadout','ObservedEvents','MatchObservedEvents','Mode'];
+  'Overtime','DurationSeconds','Loadout','ObservedEvents','MatchObservedEvents','Mode','Revision'];
 
 function reply(value) {
   return ContentService.createTextOutput(JSON.stringify(value)).setMimeType(ContentService.MimeType.JSON);
@@ -12,6 +12,7 @@ function validate(p) {
   const secret = PropertiesService.getScriptProperties().getProperty('FDG_TOKEN');
   if (!secret || secret.length < 32 || p.token !== secret) throw new Error('Unauthorized');
   const m = p.match;
+  if (m && m.Revision != null && (!Number.isSafeInteger(m.Revision) || m.Revision < 1)) throw new Error('Invalid revision');
   if (!m || typeof m.MatchGuid !== 'string' || !m.MatchGuid || m.MatchGuid.length > 256 ||
       !['fdg','casual-test'].includes(m.Mode) || ![3,13].includes(m.PlaylistId) ||
       (m.Mode === 'casual-test' && m.PlaylistId !== 3) ||
@@ -40,8 +41,14 @@ function table(ss, name, headers) {
     sheet.getRange(1,1,1,headers.length).setValues([headers]).setFontWeight('bold');
     sheet.setFrozenRows(1);
     sheet.autoResizeColumns(1,headers.length);
-  } else if (JSON.stringify(sheet.getRange(1,1,1,headers.length).getValues()[0]) !== JSON.stringify(headers)) {
-    throw new Error('Existing tab has incompatible headers: ' + name);
+  } else {
+    const existing = sheet.getRange(1,1,1,headers.length).getValues()[0];
+    if (headers[headers.length-1] === 'Revision' && existing[existing.length-1] === '' &&
+        JSON.stringify(existing.slice(0,-1)) === JSON.stringify(headers.slice(0,-1))) {
+      sheet.getRange(1,headers.length).setValues([['Revision']]).setFontWeight('bold');
+    } else if (JSON.stringify(existing) !== JSON.stringify(headers)) {
+      throw new Error('Existing tab has incompatible headers: ' + name);
+    }
   }
   return sheet;
 }
@@ -89,20 +96,30 @@ function doPost(e) {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const prefix = p.match.Mode === 'fdg' ? 'FDG' : 'TEST';
     const sheet = table(ss, prefix + '_Matches', HEADERS);
-    const keys = new Set(sheet.getLastRow()>1 ? sheet.getRange(2,1,sheet.getLastRow()-1,1).getValues().flat() : []);
+    const existing = sheet.getLastRow()>1 ? sheet.getRange(2,1,sheet.getLastRow()-1,HEADERS.length).getValues() : [];
+    const keys = new Map(existing.map((row,i)=>[row[0],{row:i+2,revision:Number(row[HEADERS.length-1]) || 0}]));
     const rows = [];
+    let updated = 0;
+    const revision = p.match.Revision || 1;
     p.players.forEach(player => {
       const m=p.match, key=m.MatchGuid+'|'+player.PrimaryId;
-      if(keys.has(key)) return;
-      const r = {...m,...player,UniqueKey:key,MatchObservedEvents:m.ObservedEvents};
-      rows.push(HEADERS.map(h=>safe(r[h])));
-      keys.add(key);
+      const r = {...m,...player,UniqueKey:key,MatchObservedEvents:m.ObservedEvents,Revision:revision};
+      const values = HEADERS.map(h=>safe(r[h]));
+      if(keys.has(key)) {
+        const previous=keys.get(key);
+        if(revision>previous.revision) {
+          sheet.getRange(previous.row,1,1,HEADERS.length).setValues([values]);
+          updated++;
+        }
+      } else {
+        rows.push(values);
+      }
     });
     if(rows.length) sheet.getRange(sheet.getLastRow()+1,1,rows.length,HEADERS.length).setValues(rows);
     // Rebuild even on retries, recovering if a previous request failed after appending rows.
     summary(ss,sheet,prefix+'_Summary');
     SpreadsheetApp.flush();
-    return reply({ok:true,matchGuid:p.match.MatchGuid,inserted:rows.length});
+    return reply({ok:true,protocol:2,matchGuid:p.match.MatchGuid,revision,inserted:rows.length,updated});
   } catch(err) {
     return reply({ok:false,error:String(err.message)});
   } finally {

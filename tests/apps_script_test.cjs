@@ -44,6 +44,22 @@ assert.equal(sheets.get('FDG_Summary').rows[1][2],1);
 // Repair a partial previous request without duplicating existing rows.
 sheets.get('FDG_Matches').rows.pop();
 assert.equal(post(payload).inserted,1);
+// Revisions replace existing rows, refresh totals, and reject stale retries.
+const correction=structuredClone(payload);correction.match.Revision=2;
+correction.players[0].Score=750;
+assert.equal(post(correction).updated,3);
+assert.equal(sheets.get('FDG_Matches').getLastRow(),4);
+assert.equal(sheets.get('FDG_Matches').rows[1][8],750);
+assert.equal(sheets.get('FDG_Summary').rows[1][6],750);
+assert.equal(sheets.get('FDG_Summary').rows[1][2],1);
+assert.equal(post(payload).updated,0);
+assert.equal(sheets.get('FDG_Matches').rows[1][8],750);
+// Migrate old headers and rows in place without deleting data.
+const matchSheet=sheets.get('FDG_Matches');
+matchSheet.rows.forEach(row=>row.pop());
+assert.equal(post(correction).updated,3);
+assert.equal(matchSheet.rows[0].at(-1),'Revision');
+assert.equal(post(correction).protocol,2);
 const test=structuredClone(payload); test.match.Mode='casual-test';test.match.MatchGuid='m2';
 test.players[0].Name='=IMPORTXML("bad")';
 assert.equal(post(test).inserted,3);

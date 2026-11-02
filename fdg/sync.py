@@ -15,11 +15,16 @@ class Sync:
                 request = urllib.request.Request(self.url, data=body, headers={"Content-Type": "application/json"})
                 with urllib.request.urlopen(request, timeout=15) as response:
                     result = json.load(response)
-                if result.get("ok") is not True or result.get("matchGuid") != guid:
-                    raise ValueError("Endpoint did not acknowledge the match")
+                revision = json.loads(payload)["match"].get("Revision", 1)
+                if result.get("protocol") != 2:
+                    print("Sheets receiver needs updating: redeploy apps_script/Code.gs as a new version.", flush=True)
+                    break
+                if result.get("ok") is not True or result.get("matchGuid") != guid or result.get("revision") != revision:
+                    raise ValueError("Endpoint did not acknowledge this match revision")
                 with self.store.db:
-                    self.store.db.execute("UPDATE matches SET synced=1 WHERE guid=?", (guid,))
-                print(f"Google Sheets synchronized: YES ({guid})", flush=True)
+                    acknowledged = self.store.db.execute("UPDATE matches SET synced=1 WHERE guid=? AND payload=?", (guid, payload)).rowcount
+                status = "YES" if acknowledged else "older revision received; newer statistics queued"
+                print(f"Google Sheets synchronized: {status} ({guid})", flush=True)
             except Exception as exc:
                 # Never log credentials or response bodies.
                 print(f"Google Sheets pending ({guid}): {type(exc).__name__}; retrying later", flush=True)
