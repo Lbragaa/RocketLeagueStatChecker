@@ -1,5 +1,4 @@
 import argparse
-import gzip
 import os
 from pathlib import Path
 import socket
@@ -11,6 +10,7 @@ from .identity import Identities
 from .storage import Store
 from .sync import Sync
 from .transport import JsonStream, read_capture
+from .retention import Retention, WireCapture
 
 
 def load_env():
@@ -45,6 +45,12 @@ def main():
         print("Identity confirmed. Restart the collector to use it.")
         store.close()
         return
+    retention = Retention(store,
+        raw_days=max(1, int(os.getenv("FDG_RAW_DAYS", "7"))),
+        raw_mb=max(16, int(os.getenv("FDG_RAW_MAX_MB", "250"))),
+        match_days=max(1, int(os.getenv("FDG_LOCAL_MATCH_DAYS", "30"))))
+    if not args.recover_wire:
+        retention.run()
     engine = Collector(store, identities, args.mode,
                        tuple(int(p) for p in os.getenv("FDG_PLAYLISTS", "3,13").split(",")),
                        settle=float("inf") if args.recover_wire else max(0, float(os.getenv("FDG_SETTLE_SECONDS", "0"))),
@@ -79,9 +85,8 @@ def main():
     worker = threading.Thread(target=upload_loop, daemon=True)
     worker.start()
     host, port = os.getenv("FDG_HOST", "127.0.0.1"), int(os.getenv("FDG_PORT", "49123"))
-    wire_path = store.directory / "raw" / f"wire-{time.time_ns()}.bin.gz"
     try:
-        with gzip.open(wire_path, "ab") as wire:
+        with WireCapture(store.directory / "raw") as wire:
             while True:
                 try:
                     print(f"Connecting to Rocket League at {host}:{port}…", flush=True)
@@ -94,6 +99,7 @@ def main():
                                 chunk = conn.recv(65536)
                             except socket.timeout:
                                 engine.flush()
+                                retention.run()
                                 continue
                             if not chunk:
                                 raise ConnectionError("Game disconnected")
@@ -101,9 +107,11 @@ def main():
                             wire.flush()
                             for message, original in stream.feed(chunk):
                                 engine.feed(message, original)
+                            retention.run()
                 except (OSError, ValueError) as exc:
                     print(f"Disconnected ({type(exc).__name__}). Retrying in 3 seconds…", flush=True)
                     engine.flush()
+                    retention.run()
                     time.sleep(3)
     except KeyboardInterrupt:
         print("\nStopping. Completed matches and pending uploads are stored locally.")

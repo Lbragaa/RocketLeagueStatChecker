@@ -18,6 +18,7 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS active (guid TEXT PRIMARY KEY, state TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS archived (guid TEXT PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS matches (
                 guid TEXT PRIMARY KEY, payload TEXT NOT NULL, synced INTEGER DEFAULT 0);
             CREATE TABLE IF NOT EXISTS players (
@@ -28,7 +29,11 @@ class Store:
     def raw(self, message, original=None):
         guid = message.get("Data", {}).get("MatchGuid", "unassigned")
         filename = hashlib.sha256(str(guid).encode()).hexdigest() + ".jsonl.gz"
-        with gzip.open(self.directory / "raw" / filename, "at", encoding="utf-8") as stream:
+        path = self.directory / "raw" / filename
+        if path.exists() and path.stat().st_size > 16 * 1024 * 1024:
+            import time
+            path.rename(path.with_name(path.stem + f"-{time.time_ns()}.gz"))
+        with gzip.open(path, "at", encoding="utf-8") as stream:
             stream.write(json.dumps({"received_at": utcnow(), "message": message,
                                      "original": original}, ensure_ascii=False) + "\n")
 
@@ -41,7 +46,7 @@ class Store:
         return {guid: json.loads(state) for guid, state in self.db.execute("SELECT * FROM active")}
 
     def exists(self, guid):
-        return self.db.execute("SELECT 1 FROM matches WHERE guid=?", (guid,)).fetchone() is not None
+        return self.db.execute("SELECT 1 FROM matches WHERE guid=? UNION ALL SELECT 1 FROM archived WHERE guid=?", (guid, guid)).fetchone() is not None
 
     def get(self, guid):
         row = self.db.execute("SELECT payload FROM matches WHERE guid=?", (guid,)).fetchone()

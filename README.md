@@ -71,7 +71,7 @@ After editing Apps Script, use **Deploy → Manage deployments → Edit → New 
 ## Storage, reliability and meaning of statistics
 
 - `data/fdg.sqlite3`: `active` holds durable in-progress snapshots; `matches` contains completed payloads and persistent upload status; `players` has the unique `(MatchGuid, PrimaryId)` key and full final player JSON. `MatchGuid` is also unique in `matches`. The same real match cannot be saved once in each mode: choose test/FDG mode before playing.
-- `data/raw/<hash>.jsonl.gz`: timestamped complete original JSON objects, including future events/fields. SHA-256 filenames avoid using external match IDs as paths. `wire-*.bin.gz` additionally preserves received socket bytes for framing diagnostics. No automatic retention/deletion; back up or archive this folder as needed. Raw data includes all observed players, not just FDG.
+- `data/raw/<hash>.jsonl.gz`: timestamped complete original JSON objects, including future events/fields. SHA-256 filenames avoid using external match IDs as paths. `wire-*.bin.gz` additionally preserves received socket bytes for framing diagnostics. Debug captures are automatically pruned after 7 days or when the approximate 250 MB capture budget is exceeded; back up captures you want to keep. Raw data includes all observed players, not just FDG.
 - Latest player snapshots merge missing fields without replacing them with invented zeros. Missing fields are blank in Sheets. Loadout and all other state fields remain in SQLite/raw JSON; key final statistics and observed event dictionaries go to Sheets.
 - A valid `MatchEnded.WinnerTeamNum` saves immediately by default using the latest received snapshots. Later final `UpdateState` statistics revise the same match and player records, even after a collector restart. Missing fields preserve their previous values. Only the originally selected players can be updated; replay playback is excluded. Set `FDG_SETTLE_SECONDS` to a positive value if you prefer to delay the initial save. `MatchDestroyed` finalizes immediately if a valid ending was seen. Closing capture preserves checkpoints; reopening resumes settlement and pending uploads. Leaving before `MatchEnded` is never treated as completion. Forfeits work when the API emits this valid ending.
 - If the collector has been stopped or disconnected across the final scoreboard, it cannot reconstruct messages that the game never delivered. Start before the match and keep the listener connected until it receives `MatchEnded`. Staying on the scoreboard or podium is not required. Later delivered final snapshots update the saved record. Data the game never sends cannot be recovered.
@@ -115,3 +115,15 @@ Use the actual filename from `data/raw`. Recovery processes the original complet
 4. Restart `start_casual_test.bat` or `start_fdg.bat`. No scoreboard waiting is required.
 
 The collector detects the previous receiver version and keeps uploads pending until you upgrade. Local capture and revisions continue safely. No spreadsheet row deletion or manual sheet reset is needed.
+
+## Automatic local cleanup
+
+Cleanup runs at normal startup and about once per minute while listening. No service or scheduled task is installed. Restart the listener after upgrading to enable it.
+
+- Raw debug captures: at most 7 days, with an approximate 250 MB total budget. Oldest captures go first. Files written in the last minute are temporarily protected; active/recent segments can exceed the budget briefly. Wire captures rotate every 16 MB of received data; per-match compressed JSONL files rotate at about 16 MB.
+- Full local match/player records: synchronized matches older than 30 days are removed. Tiny match-ID entries remain to prevent re-counting archived matches. Database space is reclaimed when possible, or reused if busy.
+- Pending uploads are never removed by match cleanup, regardless of age. Raw debug captures can expire independently; the complete structured upload payload remains until acknowledged.
+- Abandoned in-progress checkpoints older than 7 days are removed; checkpoints with a valid completion event remain recoverable.
+- Confirmed identities, configuration, and all Google Sheets match history and summaries are retained.
+
+Optional `.env` overrides: `FDG_RAW_DAYS=7`, `FDG_RAW_MAX_MB=250`, `FDG_LOCAL_MATCH_DAYS=30`. Defaults apply to existing `.env` files too. Local storage can grow beyond these limits if uploads keep failing, because pending match statistics are deliberately preserved. To keep a permanent debug archive, copy captures elsewhere before they expire. Offline recovery skips cleanup so its input cannot be deleted during recovery.

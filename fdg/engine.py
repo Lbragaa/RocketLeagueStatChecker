@@ -96,6 +96,8 @@ class Collector:
         if game.get("bReplay") and not game.get("bHasWinner"):
             return
         payload = self.store.get(guid)
+        if payload is None:  # Aged-out synchronized match: keep deduplication only.
+            return
         match = payload["match"]
         if game.get("PlaylistId", match["PlaylistId"]) != match["PlaylistId"]:
             return
